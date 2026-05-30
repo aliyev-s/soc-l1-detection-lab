@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # Elasticsearch - Log Storage
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - soc-network
+    healthcheck:
+      test: curl -s http://localhost:9200 >/dev/null || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kibana - Log Exploration
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.10.0
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - soc-network
+
+  # Prometheus - Metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    networks:
+      - soc-network
+
+  # Grafana - Dashboard & Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./dashboard/grafana/provisioning/:/etc/grafana/provisioning/
+      - ./dashboard/grafana/dashboards/:/var/lib/grafana/dashboards/
+    depends_on:
+      - elasticsearch
+      - prometheus
+    networks:
+      - soc-network
+
+  # API Service - Log Ingestion
+  api:
+    image: python:3.11-slim
+    container_name: api-service
+    working_dir: /app
+    volumes:
+      - ./scripts:/app
+      - ./logs-samples:/data/logs
+    command: python -m http.server 5000
+    ports:
+      - "5000:5000"
+    networks:
+      - soc-network
+
+networks:
+  soc-network:
+    driver: bridge
+
+volumes:
+  elasticsearch_data:
+  prometheus_data:
+  grafana_data:
